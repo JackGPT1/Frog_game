@@ -105,10 +105,12 @@ function createLevel() {
 // ========================
 function createGameState() {
   return {
-    state: 'start', // 'start' | 'playing' | 'gameover' | 'win'
+    state: 'start', // 'start' | 'playing' | 'paused' | 'gameover' | 'win'
     timer: 0,
     score: 0,
     startTime: 0,
+    pauseStartedAt: 0,
+    totalPausedTime: 0,
     frameCount: 0,
   };
 }
@@ -474,6 +476,54 @@ function drawHUD(ctx, gameState) {
   ctx.fillText(`⭐ 分數: ${gameState.score}`, CANVAS_WIDTH - 20, 33);
 }
 
+function drawPauseButton(ctx, gameState) {
+  if (gameState.state !== 'playing' && gameState.state !== 'paused') return;
+
+  const buttonWidth = 120;
+  const buttonHeight = 40;
+  const buttonX = CANVAS_WIDTH - buttonWidth - 20;
+  const buttonY = 60;
+
+  ctx.fillStyle =
+    gameState.state === 'paused'
+      ? 'rgba(34, 197, 94, 0.95)'
+      : 'rgba(30, 41, 59, 0.95)';
+  ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(buttonX, buttonY, buttonWidth, buttonHeight);
+
+  ctx.fillStyle = COLORS.textLight;
+  ctx.font = 'bold 16px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    gameState.state === 'paused' ? '▶ 繼續' : '⏸ 暫停',
+    buttonX + buttonWidth / 2,
+    buttonY + 26
+  );
+}
+
+function isPauseButtonClicked(event) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = CANVAS_WIDTH / rect.width;
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  const mouseX = (event.clientX - rect.left) * scaleX;
+  const mouseY = (event.clientY - rect.top) * scaleY;
+
+  const buttonWidth = 120;
+  const buttonHeight = 40;
+  const buttonX = CANVAS_WIDTH - buttonWidth - 20;
+  const buttonY = 60;
+
+  return (
+    mouseX >= buttonX &&
+    mouseX <= buttonX + buttonWidth &&
+    mouseY >= buttonY &&
+    mouseY <= buttonY + buttonHeight
+  );
+}
+
 function drawOverlay(ctx, title, subtitle, instruction) {
   // 半透明黑色遮罩
   ctx.fillStyle = COLORS.overlay;
@@ -536,6 +586,15 @@ export function initGame(canvas) {
         input.up = true;
         e.preventDefault();
         break;
+        case 'KeyP':
+      case 'Escape':
+        if (gameState.state === 'playing') {
+          pauseGame();
+        } else if (gameState.state === 'paused') {
+          resumeGame();
+        }
+        e.preventDefault();
+        break;
       case 'Enter':
         if (gameState.state === 'start' || gameState.state === 'gameover' || gameState.state === 'win') {
           startGame();
@@ -576,7 +635,31 @@ export function initGame(canvas) {
     gameState.timer = 0;
     gameState.score = 0;
     gameState.startTime = performance.now();
+    gameState.pauseStartedAt = 0;
+    gameState.totalPausedTime = 0;
     gameState.frameCount = 0;
+  }
+
+  function pauseGame() {
+    if (gameState.state !== 'playing') return;
+
+    gameState.state = 'paused';
+    gameState.pauseStartedAt = performance.now();
+
+    // 避免暫停前正在按住的方向／跳躍鍵在繼續後立即生效
+    input.left = false;
+    input.right = false;
+    input.up = false;
+    input.jumpPressed = false;
+  }
+
+  function resumeGame() {
+    if (gameState.state !== 'paused') return;
+
+    const now = performance.now();
+    gameState.totalPausedTime += now - gameState.pauseStartedAt;
+    gameState.pauseStartedAt = 0;
+    gameState.state = 'playing';
   }
 
   function gameOver() {
@@ -593,12 +676,17 @@ export function initGame(canvas) {
 
   // --- 主遊戲迴圈 ---
   function gameLoop() {
-    gameState.frameCount++;
+    if (gameState.state !== 'paused') {
+      gameState.frameCount++;
+    }
 
     // 1. 更新
     if (gameState.state === 'playing') {
-      // 更新計時器
-      gameState.timer = performance.now() - gameState.startTime;
+      // 更新計時器（扣除所有暫停時間）
+      gameState.timer = Math.max(
+        0,
+        performance.now() - gameState.startTime - gameState.totalPausedTime
+      );
 
       // 更新玩家
       const status = updatePlayer(player, input, level);
@@ -642,7 +730,7 @@ export function initGame(canvas) {
     drawPlayer(ctx, camera, player, gameState.frameCount);
 
     // 繪製 HUD
-    if (gameState.state === 'playing') {
+    if (gameState.state === 'playing' || gameState.state === 'paused') {
       drawHUD(ctx, gameState);
     }
 
@@ -680,12 +768,35 @@ export function initGame(canvas) {
       );
     }
 
+    if (gameState.state === 'paused') {
+      const timeStr = (gameState.timer / 1000).toFixed(1);
+      drawOverlay(
+        ctx,
+        '⏸ 已暫停',
+        `目前時間 ${timeStr} 秒`,
+        '點擊「▶ 繼續」或按 P / Esc 繼續遊戲'
+      );
+    }
+
+    // 暫停／繼續按鈕要最後繪製，確保暫停遮罩不會蓋住按鈕
+    drawPauseButton(ctx, gameState);
+
     // 4. 下一幀
     animFrameId = requestAnimationFrame(gameLoop);
   }
 
   // --- 點擊事件（用於開始/重新開始）---
-  function handleClick() {
+  function handleClick(event) {
+    if (gameState.state === 'playing' && isPauseButtonClicked(event)) {
+      pauseGame();
+      return;
+    }
+
+    if (gameState.state === 'paused' && isPauseButtonClicked(event)) {
+      resumeGame();
+      return;
+    }
+
     if (gameState.state === 'start' || gameState.state === 'gameover' || gameState.state === 'win') {
       startGame();
     }
