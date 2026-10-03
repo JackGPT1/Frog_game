@@ -26,7 +26,7 @@ export default function App() {
         style={{ maxWidth: '100%', height: 'auto' }}
       />
       <div className="mt-4 text-gray-400 text-sm text-center">
-        <p>← → 或 A D 移動 ｜ ↑ 或 W 或空白鍵 跳躍 ｜ Enter 開始/重新開始</p>
+        <p>← → 或 A D 移動 ｜ ↑ 或 W 或空白鍵 跳躍 ｜ P / Esc 或右上角按鈕暫停 ｜ Enter 開始/重新開始</p>
       </div>
     </div>
   );
